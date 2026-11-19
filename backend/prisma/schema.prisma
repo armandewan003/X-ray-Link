@@ -1,0 +1,331 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AdminRole {
+  OWNER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  REVOKED
+}
+
+enum VpnProtocol {
+  WIREGUARD
+  SSH_TLS
+  WEBSOCKET_TLS
+  XRAY_VLESS
+}
+
+enum SessionStatus {
+  CONNECTING
+  CONNECTED
+  RECONNECTING
+  DISCONNECTED
+  FAILED
+  EXPIRED
+  REVOKED
+}
+
+enum CreditTxType {
+  CREDIT_ADD
+  CREDIT_DEDUCT
+  USER_CREATE_CHARGE
+  USER_EXTEND_CHARGE
+  REFUND
+}
+
+model Administrator {
+  id           String    @id @default(uuid()) @db.Uuid
+  name         String
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  roleName     AdminRole @map("role_name")
+  permissions  Json      @default("[]")
+  status       String    @default("ACTIVE")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  createdResellers Reseller[]
+
+  @@map("administrators")
+}
+
+model Reseller {
+  id                   String    @id @default(uuid()) @db.Uuid
+  name                 String
+  email                String    @unique
+  passwordHash         String    @map("password_hash")
+  status               String    @default("ACTIVE")
+  creditLimit          Int       @default(10000) @map("credit_limit")
+  maxUsers             Int       @default(100) @map("max_users")
+  allowNegativeBalance Boolean   @default(false) @map("allow_negative_balance")
+  expiresAt            DateTime? @map("expires_at")
+  permissions          Json      @default("[]")
+  createdByAdminId     String?   @map("created_by_admin_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  deletedAt            DateTime? @map("deleted_at")
+
+  createdByAdmin   Administrator?              @relation(fields: [createdByAdminId], references: [id])
+  wallet           ResellerWallet?
+  userAssignments  ResellerUserAssignment[]
+  transactions     CreditTransaction[]
+  allowedServers   ResellerServerPermission[]
+  allowedProfiles  ResellerProfilePermission[]
+
+  @@map("resellers")
+}
+
+model VpnUser {
+  id            String        @id @default(uuid()) @db.Uuid
+  username      String        @unique
+  displayName   String        @map("display_name")
+  status        AccountStatus @default(ACTIVE)
+  deviceLimit   Int           @default(2) @map("device_limit")
+  expiresAt     DateTime      @map("expires_at")
+  notes         String        @default("")
+  createdByRole String        @map("created_by_role")
+  createdById   String        @map("created_by_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  deletedAt     DateTime?     @map("deleted_at")
+
+  resellerAssignment ResellerUserAssignment?
+  pins               PinCode[]
+  devices            RegisteredDevice[]
+  sessions           VpnSession[]
+
+  @@map("users")
+}
+
+model ResellerUserAssignment {
+  id         String   @id @default(uuid()) @db.Uuid
+  resellerId String   @map("reseller_id") @db.Uuid
+  userId     String   @unique @map("user_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  reseller Reseller @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+  user     VpnUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reseller_user_assignments")
+}
+
+model PinCode {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  pinCode      String    @unique @map("pin_code")
+  pinHash      String    @unique @map("pin_hash")
+  status       String    @default("ACTIVE")
+  expiresAt    DateTime  @map("expires_at")
+  issuedByRole String    @map("issued_by_role")
+  issuedById   String    @map("issued_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  revokedAt    DateTime? @map("revoked_at")
+
+  user     VpnUser      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions VpnSession[]
+
+  @@map("pin_codes")
+}
+
+model RegisteredDevice {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  deviceFingerprint String   @map("device_fingerprint")
+  deviceName        String   @map("device_name")
+  platform          String   @default("android")
+  appVersion        String   @default("1.0.0") @map("app_version")
+  isRevoked         Boolean  @default(false) @map("is_revoked")
+  lastSeenAt        DateTime @default(now()) @map("last_seen_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user     VpnUser      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions VpnSession[]
+
+  @@unique([userId, deviceFingerprint])
+  @@map("registered_devices")
+}
+
+model VpnServer {
+  id           String      @id @default(uuid()) @db.Uuid
+  name         String
+  countryCode  String      @map("country_code")
+  location     String
+  endpoint     String
+  port         Int
+  protocol     VpnProtocol
+  wgPublicKey  String      @map("wg_public_key")
+  priority     Int         @default(10)
+  capacity     Int         @default(500)
+  latencyMs    Int         @default(25) @map("latency_ms")
+  healthStatus String      @default("ONLINE") @map("health_status")
+  isEnabled    Boolean     @default(true) @map("is_enabled")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  deletedAt    DateTime?   @map("deleted_at")
+
+  profileAssignments ServerProfileAssignment[]
+  resellerGrants     ResellerServerPermission[]
+  sessions           VpnSession[]
+
+  @@map("vpn_servers")
+}
+
+model ConnectionProfile {
+  id                 String      @id @default(uuid()) @db.Uuid
+  name               String
+  protocol           VpnProtocol
+  authorizedHostname String      @map("authorized_hostname")
+  sniHost            String      @default("") @map("sni_host")
+  wsPath             String      @default("/xray-ws") @map("ws_path")
+  wsHeaders          Json        @default("{}") @map("ws_headers")
+  description        String      @default("")
+  accessTier         String      @default("STANDARD") @map("access_tier")
+  isEnabled          Boolean     @default(true) @map("is_enabled")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+  deletedAt          DateTime?   @map("deleted_at")
+
+  serverAssignments ServerProfileAssignment[]
+  resellerGrants    ResellerProfilePermission[]
+  sessions          VpnSession[]
+
+  @@map("connection_profiles")
+}
+
+model ServerProfileAssignment {
+  id        String   @id @default(uuid()) @db.Uuid
+  serverId  String   @map("server_id") @db.Uuid
+  profileId String   @map("profile_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  server  VpnServer         @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  profile ConnectionProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, profileId])
+  @@map("server_profile_assignments")
+}
+
+model ResellerServerPermission {
+  id         String   @id @default(uuid()) @db.Uuid
+  resellerId String   @map("reseller_id") @db.Uuid
+  serverId   String   @map("server_id") @db.Uuid
+  grantedAt  DateTime @default(now()) @map("granted_at")
+
+  reseller Reseller  @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+  server   VpnServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([resellerId, serverId])
+  @@map("reseller_server_permissions")
+}
+
+model ResellerProfilePermission {
+  id         String   @id @default(uuid()) @db.Uuid
+  resellerId String   @map("reseller_id") @db.Uuid
+  profileId  String   @map("profile_id") @db.Uuid
+  grantedAt  DateTime @default(now()) @map("granted_at")
+
+  reseller Reseller          @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+  profile  ConnectionProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([resellerId, profileId])
+  @@map("reseller_profile_permissions")
+}
+
+model VpnSession {
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @map("user_id") @db.Uuid
+  pinId            String        @map("pin_id") @db.Uuid
+  deviceId         String        @map("device_id") @db.Uuid
+  serverId         String        @map("server_id") @db.Uuid
+  profileId        String        @map("profile_id") @db.Uuid
+  status           SessionStatus
+  clientTunnelIp   String        @map("client_tunnel_ip")
+  clientPublicKey  String        @default("") @map("client_public_key")
+  bytesUp          BigInt        @default(0) @map("bytes_up")
+  bytesDown        BigInt        @default(0) @map("bytes_down")
+  uploadSpeedBps   BigInt        @default(0) @map("upload_speed_bps")
+  downloadSpeedBps BigInt        @default(0) @map("download_speed_bps")
+  latencyMs        Int           @default(0) @map("latency_ms")
+  connectedAt      DateTime      @default(now()) @map("connected_at")
+  lastHeartbeatAt  DateTime      @default(now()) @map("last_heartbeat_at")
+  disconnectedAt   DateTime?     @map("disconnected_at")
+  disconnectReason String?       @map("disconnect_reason")
+
+  user    VpnUser           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pin     PinCode           @relation(fields: [pinId], references: [id])
+  device  RegisteredDevice  @relation(fields: [deviceId], references: [id])
+  server  VpnServer         @relation(fields: [serverId], references: [id])
+  profile ConnectionProfile @relation(fields: [profileId], references: [id])
+
+  @@map("vpn_sessions")
+}
+
+model ResellerWallet {
+  id             String   @id @default(uuid()) @db.Uuid
+  resellerId     String   @unique @map("reseller_id") @db.Uuid
+  balanceCredits Int      @default(0) @map("balance_credits")
+  totalCredited  Int      @default(0) @map("total_credited")
+  totalSpent     Int      @default(0) @map("total_spent")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  reseller Reseller @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+
+  @@map("reseller_wallets")
+}
+
+model CreditTransaction {
+  id              String       @id @default(uuid()) @db.Uuid
+  resellerId      String       @map("reseller_id") @db.Uuid
+  txType          CreditTxType @map("tx_type")
+  amount          Int
+  balanceBefore   Int          @map("balance_before")
+  balanceAfter    Int          @map("balance_after")
+  referenceUserId String?      @map("reference_user_id") @db.Uuid
+  idempotencyKey  String       @unique @map("idempotency_key")
+  description     String
+  performedByRole String       @map("performed_by_role")
+  performedById   String       @map("performed_by_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  reseller Reseller @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+
+  @@map("credit_transactions")
+}
+
+model ConfigurationVersion {
+  version       Int      @id @default(autoincrement())
+  changeSummary String   @map("change_summary")
+  changedByRole String   @map("changed_by_role")
+  changedById   String   @map("changed_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("configuration_versions")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorRole    String   @map("actor_role")
+  actorId      String   @map("actor_id")
+  actorEmail   String   @map("actor_email")
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id")
+  details      Json     @default("{}")
+  ipAddress    String   @map("ip_address")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}

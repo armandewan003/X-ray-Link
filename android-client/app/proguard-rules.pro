@@ -1,0 +1,6 @@
+-keepattributes Signature,*Annotation*,EnclosingMethod,InnerClasses
+-keep class com.xraylink.client.data.** { *; }
+-keep class com.xraylink.client.vpn.** { *; }
+-keep class com.wireguard.** { *; }
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**

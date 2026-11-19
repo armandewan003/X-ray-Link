@@ -1,0 +1,4 @@
+-keepattributes Signature,*Annotation*,EnclosingMethod,InnerClasses
+-keep class com.xraylink.admin.data.** { *; }
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**
