@@ -34,7 +34,7 @@ jobs:
           fi
 
           cp -a /tmp/xray-extract/x-ray-link/. .
-
+          rm -f .github/workflows/build-android-apks.yml
           echo "Project extracted successfully"
 
           ls -la
