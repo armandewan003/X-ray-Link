@@ -43,7 +43,7 @@ jobs:
         working-directory: android-admin
         run: gradle assembleDebug
 
-      - name: Upload Client APK
+      - name: Upload Client APk
         uses: actions/upload-artifact@v4
         with:
           name: XRayLink-Client-APK
